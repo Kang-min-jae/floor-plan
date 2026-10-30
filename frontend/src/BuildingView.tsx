@@ -16,6 +16,7 @@ import type { Opening, Wall } from "./api";
 import { SLAB_MM, SPACE_LABEL, polygonArea, stairDims, type FloorModel } from "./building";
 import { LEVEL_LABEL, type Finding } from "./rules";
 import { RISK_PIN } from "./riskPin";
+import { makeFadingGrid, stageVar } from "./stageFloor";
 import { KIND_LABEL, OPENING_LABEL, wallLength } from "./plan";
 
 export type Layer = "wall" | "door" | "window" | "floor" | "stair" | "space";
@@ -129,6 +130,12 @@ export function BuildingView({
     shadowPlane.position.y = -SLAB_MM / 1000;
     shadowPlane.receiveShadow = true;
     scene.add(shadowPlane);
+    // 바닥 격자 — 무대 CSS 변수 --stage-grid-style(lines | dots | none)이 정한다 (stageFloor.ts)
+    const gridStyle = stageVar(el, "--stage-grid-style", "none");
+    if (gridStyle !== "none") {
+      scene.add(makeFadingGrid({ center: new THREE.Vector3(0, 0, 0), radius: span * Number(stageVar(el, "--stage-grid-reach", "2.2")), y: -SLAB_MM / 1000 - 0.003,
+        color: stageVar(el, "--stage-grid", "#8f8e88"), alpha: Number(stageVar(el, "--stage-grid-alpha", "0.24")), dots: gridStyle === "dots" }));
+    }
 
     const root = new THREE.Group();
     root.position.set(-(minX + maxX) / 2, 0, -(minZ + maxZ) / 2);

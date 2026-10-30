@@ -10,7 +10,7 @@ export function stageVar(el: Element, name: string, fallback: string) {
 }
 
 /** 가운데서 멀어질수록 흐려지는 바닥 격자 (1m 칸 + 5m 굵은 칸) */
-export function makeFadingGrid(o: { center: THREE.Vector3; radius: number; y: number; color: string; alpha: number }) {
+export function makeFadingGrid(o: { center: THREE.Vector3; radius: number; y: number; color: string; alpha: number; dots?: boolean }) {
   const mat = new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
@@ -19,6 +19,7 @@ export function makeFadingGrid(o: { center: THREE.Vector3; radius: number; y: nu
       uAlpha: { value: o.alpha },
       uCenter: { value: new THREE.Vector2(o.center.x, o.center.z) },
       uRadius: { value: o.radius },
+      uDots: { value: o.dots ? 1 : 0 },
     },
     vertexShader: [
       "varying vec3 vW;",
@@ -33,14 +34,20 @@ export function makeFadingGrid(o: { center: THREE.Vector3; radius: number; y: nu
       "uniform float uAlpha;",
       "uniform vec2 uCenter;",
       "uniform float uRadius;",
+      "uniform float uDots;",
       "varying vec3 vW;",
       "float grid(float s) {",
       "  vec2 c = vW.xz / s;",
       "  vec2 g = abs(fract(c - 0.5) - 0.5) / fwidth(c);",
       "  return 1.0 - min(min(g.x, g.y), 1.0);",
       "}",
+      "float dots(float s) {",
+      "  vec2 c = vW.xz / s;",
+      "  vec2 g = abs(fract(c - 0.5) - 0.5) / fwidth(c);",
+      "  return 1.0 - smoothstep(0.6, 1.6, length(g) * 0.5);",
+      "}",
       "void main() {",
-      "  float l = max(grid(1.0) * 0.55, grid(5.0));",
+      "  float l = uDots > 0.5 ? dots(1.0) : max(grid(1.0) * 0.55, grid(5.0));",
       "  float d = length(vW.xz - uCenter) / uRadius;",
       "  float a = l * uAlpha * (1.0 - smoothstep(0.2, 1.0, d));",
       "  if (a < 0.004) discard;",

@@ -84,11 +84,20 @@
  * 3D 쪽(stageFloor.ts·Viewer3D·BuildingView)은 무대를 감싼 요소에서 --stage-* 를 읽는다. */
 [data-preset="calm"] {
   --stage-top: #fdfdfc;
-  --stage-bottom: #d9d8d3;
-  --stage-grid: #8f8e88;
-  --stage-grid-alpha: 0.24;
+  --stage-bottom: #e4e3df;
+  --stage-bg: radial-gradient(130% 100% at 50% 30%, var(--stage-top) 0%, #f6f5f2 45%, var(--stage-bottom) 100%);
+  /* 2026-10-30 사용자 결정(시안 4개 중 B "디지털 트윈 격자"): 끝없이 이어지다 흐려지는 선 격자 바닥 — 건축 도구다운 가상공간 */
+  --stage-grid-style: lines;    /* lines | dots | none */
+  --stage-grid-reach: 4;        /* 건물 크기의 몇 배까지 격자를 깔지 (BuildingView) */
+  --stage-grid: #7f7e78;
+  --stage-grid-alpha: 0.38;
   --stage-shadow: 0.2;
 }
+/* 첫 화면: 격자가 건물 둘레에서만 보이고 왼쪽 제목·표 쪽으로 가기 전에 흐려지게 */
+.h-stage {
+  --stage-grid-reach: 1;
+  --stage-grid-alpha: 0.3;
+}
 .stage-backdrop {
-  background: radial-gradient(130% 100% at 50% 28%, var(--stage-top) 0%, var(--stage-top) 38%, var(--stage-bottom) 100%);
+  background: var(--stage-bg, radial-gradient(130% 100% at 50% 28%, var(--stage-top) 0%, var(--stage-top) 38%, var(--stage-bottom) 100%));
 }

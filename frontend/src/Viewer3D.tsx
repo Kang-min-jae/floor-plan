@@ -181,7 +181,7 @@ export function Viewer3D({ url, modelKey, plan, selected, review, onSelect, onEr
         center = box.getCenter(new THREE.Vector3());
         // 무대 바닥: 멀어질수록 흐려지는 격자 + 부드러운 그림자 (stageFloor.ts) — 색·세기는 무대 CSS 변수
         const reach = Math.max(size.x, size.z);
-        scene.add(makeFadingGrid({ center, radius: reach * 1.3 + 4, y: box.min.y - 0.002, color: stageVar(el, "--stage-grid", "#9a9993"), alpha: Number(stageVar(el, "--stage-grid-alpha", "0.35")) }));
+        scene.add(makeFadingGrid({ center, radius: reach * 1.3 + 4, y: box.min.y - 0.002, color: stageVar(el, "--stage-grid", "#9a9993"), alpha: Number(stageVar(el, "--stage-grid-alpha", "0.35")), dots: stageVar(el, "--stage-grid-style", "lines") === "dots" }));
         scene.add(makeShadowFloor({ center, size: reach * 6 + 10, y: box.min.y - 0.001, opacity: Number(stageVar(el, "--stage-shadow", "0.16")) }));
         sun.position.set(center.x - reach * 0.6, center.y + reach * 1.4, center.z + reach * 0.9);
         sun.target.position.copy(center);
