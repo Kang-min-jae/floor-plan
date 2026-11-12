@@ -8,12 +8,18 @@ import { Button, EmptyState, ProgressBar, SiteHeader, SpecList, Stepper, ToastPr
 import { ACCEPT, ApiError, MAX_UPLOAD_MB, createJob, errorText } from "./api";
 import { useJob } from "./useJob";
 import { SAMPLE_FLOORS } from "./sampleBuilding";
-import { buildingFromHash, buildingHash, defaultFloorHeight, type Building } from "./building";
+import { MAX_PLANS, buildingFromHash, buildingHash, defaultFloorHeight, siteFromHash, siteHash, type Building, type Site } from "./building";
 import { Workspace } from "./Workspace";
+import { SheetSplitter } from "./SheetSplitter";
+import { detectRegions, readImage, type Region } from "./sheet";
 
 // 첫 화면의 3D 모형도 three.js를 쓰므로 나중에 불러온다
 const BuildingView = lazy(() => import("./BuildingView").then((m) => ({ default: m.BuildingView })));
 const BuildingPage = lazy(() => import("./BuildingPage").then((m) => ({ default: m.BuildingPage })));
+const SitePage = lazy(() => import("./SitePage").then((m) => ({ default: m.SitePage })));
+
+// 방금 올린 원본 그림(작업 ID → 파일). 결과 화면에서 "도면 나누기"를 누르면 다시 고르지 않고 바로 나눌 수 있게 — 새로 고치면 사라진다
+const uploaded = new Map<string, File>();
 
 const STEPS = ["도면 올리기", "벽·문·창 인식", "확인·고치기·받기"];
 
@@ -35,6 +41,12 @@ function Shell() {
   const [jobId, setJobId] = useState<string | null>(jobFromHash);
   const [page, setPage] = useState<Page>(pageFromHash);
   const [building, setBuilding] = useState<Building | null>(buildingFromHash);
+  const [site, setSite] = useState<Site | null>(siteFromHash);
+  // 도면 나누기 창: ask = 올리기 전에 "평면이 여러 개 보여요"라고 물어보는 중(그대로 올리기도 가능)
+  const [split, setSplit] = useState<{ file: File; regions: Region[] | null; ask: boolean } | null>(null);
+  const [splitBusy, setSplitBusy] = useState<string | null>(null);
+  const [splitErr, setSplitErr] = useState<string>();
+  const repick = useRef<HTMLInputElement>(null);
   const { job, error, busy, track } = useJob(jobId);
   const [uploading, setUploading] = useState(false);
   const [uploadErr, setUploadErr] = useState<string>();
@@ -44,22 +56,20 @@ function Shell() {
       setJobId(jobFromHash());
       setPage(pageFromHash());
       setBuilding(buildingFromHash());
+      setSite(siteFromHash());
       window.scrollTo({ top: 0 });
     };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
-  const onFile = useCallback(
+  /** 그대로 한 장 올리기 */
+  const uploadWhole = useCallback(
     async (file: File) => {
-      setUploadErr(undefined);
-      // 브라우저에서 먼저 거른다 — 최종 판단은 서버(415)
-      const ext = file.name.toLowerCase().match(/\.[a-z0-9]+$/)?.[0] ?? "";
-      if (!ACCEPT.split(",").includes(ext)) return setUploadErr(errorText("unsupported_media_type"));
-      if (file.size > MAX_UPLOAD_MB * 1024 * 1024) return setUploadErr(`파일이 너무 커요. ${MAX_UPLOAD_MB}MB 이하로 올려 주세요.`);
       setUploading(true);
       try {
         const j = await createJob(file);
+        uploaded.set(j.id, file);
         history.pushState(null, "", `#job-${j.id}`);
         setJobId(j.id);
         track(j);
@@ -73,6 +83,44 @@ function Shell() {
     [track],
   );
 
+  const onFile = useCallback(
+    async (file: File) => {
+      setUploadErr(undefined);
+      // 브라우저에서 먼저 거른다 — 최종 판단은 서버(413·415)
+      const ext = file.name.toLowerCase().match(/\.[a-z0-9]+$/)?.[0] ?? "";
+      if (!ACCEPT.split(",").includes(ext)) return setUploadErr(errorText("unsupported_media_type"));
+      if (file.size > MAX_UPLOAD_MB * 1024 * 1024) return setUploadErr(`파일이 너무 커요. ${MAX_UPLOAD_MB}MB 이하로 올려 주세요.`);
+      // 한 장에 평면이 여러 개로 보이면 먼저 물어본다(나눠 올리기 / 그대로 올리기). 못 읽는 형식·하나뿐이면 바로 올린다
+      const img = await readImage(file);
+      const regions = img ? detectRegions(img, MAX_PLANS) : [];
+      img?.close();
+      if (regions.length >= 2) return setSplit({ file, regions, ask: true });
+      uploadWhole(file);
+    },
+    [uploadWhole],
+  );
+
+  /** 평면마다 자른 그림을 차례로 올리고(서버는 한 번에 하나씩 인식한다), 건물 여러 개 화면으로 간다 */
+  const uploadParts = async (parts: File[]) => {
+    if (!split) return;
+    setSplitErr(undefined);
+    try {
+      const ids: string[] = [];
+      for (let i = 0; i < parts.length; i++) {
+        setSplitBusy(`${i + 1} / ${parts.length} 올리는 중`);
+        ids.push((await createJob(parts[i])).id);
+      }
+      const sheet = split.file.name;
+      setSplit(null);
+      if (ids.length === 1) location.hash = `#job-${ids[0]}`;
+      else location.hash = siteHash({ use: "apartment", sheet, stacks: ids.map((id) => [{ jobId: id, name: "1F", heightMm: 2900, stairs: [] }]) });
+    } catch (e) {
+      setSplitErr(e instanceof ApiError ? e.message : "올리지 못했어요. 다시 시도해 주세요.");
+    } finally {
+      setSplitBusy(null);
+    }
+  };
+
   const trySample = useCallback(async () => {
     const res = await fetch("/sample/plan.png").catch(() => null);
     if (!res?.ok) return setUploadErr("샘플 평면도를 불러오지 못했어요.");
@@ -82,12 +130,20 @@ function Shell() {
   const restart = () => {
     history.pushState(null, "", location.pathname);
     setJobId(null);
+    setBuilding(null);
+    setSite(null);
     setUploadErr(undefined);
   };
 
   // ─── 지금 보여줄 화면 ───
   let content;
-  if (!jobId && building) {
+  if (!jobId && site) {
+    content = (
+      <Suspense fallback={null}>
+        <SitePage site={site} onChange={(s2) => { history.replaceState(null, "", siteHash(s2)); setSite(s2); }} />
+      </Suspense>
+    );
+  } else if (!jobId && building) {
     content = (
       <Suspense fallback={null}>
         <BuildingPage building={building} onChange={(b) => { history.replaceState(null, "", buildingHash(b)); setBuilding(b); }} />
@@ -113,6 +169,12 @@ function Shell() {
   } else if (job && job.result_revision !== null) {
     content = (
       <Workspace key={job.id} job={job} busy={busy} track={track} onRestart={restart}
+        onSplit={job.input.type === "image" ? () => {
+          // 원본 그림이 아직 브라우저에 있으면 바로, 없으면(새로 고침·다른 사람이 연 주소) 다시 고르게 한다
+          const f = uploaded.get(job.id);
+          if (f) setSplit({ file: f, regions: null, ask: false });
+          else repick.current?.click();
+        } : undefined}
         onBuilding={() => {
           // 이 도면을 1층으로 하는 건물 — 위층은 건물 화면에서 추가
           const b: Building = { use: "apartment", floors: [{ jobId: job.id, name: "1F", heightMm: job.plan ? defaultFloorHeight(job.plan) : 2900, stairs: [] }] };
@@ -150,7 +212,7 @@ function Shell() {
       <SiteHeader
         brand={<a href="#" onClick={(e) => { e.preventDefault(); restart(); }} className="tracking-title">Auto-BIM</a>}
         items={[
-          { label: "변환하기", href: "#", current: !jobId && !building && page === "home" },
+          { label: "변환하기", href: "#", current: !jobId && !building && !site && page === "home" },
           { label: "샘플 건물", href: "#sample", current: !jobId && page === "sample" },
           { label: "사용법", href: "#how", current: !jobId && page === "how" },
           { label: "소개", href: "#about", current: !jobId && page === "about" },
@@ -159,7 +221,20 @@ function Shell() {
         navAlign="center"
       />
       {/* 첫 화면은 무대가 화면 끝까지(container 밖), 나머지는 본문 폭 */}
-      <main className={cx("flex-1", jobId || building || page !== "home" ? "container-page pb-24" : "")}>{content}</main>
+      <main className={cx("flex-1", jobId || building || site || page !== "home" ? "container-page pb-24" : "")}>{content}</main>
+      {/* 도면 나누기 — 닫혀 있어도 붙여 둔다(닫으면 누른 버튼으로 포커스가 돌아가게) */}
+      <input ref={repick} type="file" accept=".png,.jpg,.jpeg,.bmp,.webp" className="sr-only" tabIndex={-1} aria-hidden
+        onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) setSplit({ file: f, regions: null, ask: false }); }} />
+      <SheetSplitter
+        file={split?.file ?? null}
+        suggested={split?.regions}
+        busy={splitBusy !== null}
+        progress={splitBusy ?? undefined}
+        error={splitErr}
+        onSplit={uploadParts}
+        onWhole={split?.ask ? () => { const f = split.file; setSplit(null); uploadWhole(f); } : undefined}
+        onClose={() => { if (!splitBusy) { setSplit(null); setSplitErr(undefined); } }}
+      />
       <footer className="border-t border-line">
         <div className="container-page flex flex-wrap justify-between gap-2 py-6 text-label text-ink-3">
           <span>로그인 없이 써요. 결과는 작업 주소를 아는 사람만 열 수 있어요.</span>

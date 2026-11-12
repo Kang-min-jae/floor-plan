@@ -143,6 +143,8 @@ const ERROR_TEXT: Record<string, string> = {
   no_plan: "인식 결과가 없어서 고칠 수 없어요. 다른 도면으로 다시 올려 주세요.",
   not_ready: "아직 결과 파일이 없어요.",
   unsupported_media_type: "평면도 이미지(PNG·JPG·BMP·TIFF·WEBP)나 DXF만 올릴 수 있어요.",
+  file_too_large: "파일이 너무 커요. 더 작은 파일로 올려 주세요.",
+  image_too_large: "그림이 너무 커요(가로 × 세로 픽셀 수). 해상도를 낮춰 올려 주세요.",
   unknown_element: "이미 지워졌거나 없는 요소예요. 화면을 새로 고친 뒤 다시 해 주세요.",
   invalid_supplement: "적용할 수 없는 값이에요. 숫자를 확인해 주세요.",
   // Job.error.code — 작업이 실패한 이유
@@ -201,4 +203,4 @@ export const downloadName = (job: Job, kind: FileKind) =>
 
 // 업로드 전에 브라우저에서 먼저 거르는 형식 (최종 판단은 서버)
 export const ACCEPT = ".png,.jpg,.jpeg,.bmp,.tif,.tiff,.webp,.dxf";
-export const MAX_UPLOAD_MB = 20; // 백엔드 업로드 제한(이슈 #4)이 정해지면 같은 값으로 맞춘다
+export const MAX_UPLOAD_MB = 30; // 백엔드 limits.max_upload_mb 기본값과 같게(docs/api.md "업로드 제한", 413 file_too_large). 픽셀 수 상한(4천만)은 서버가 본다

@@ -41,28 +41,31 @@ export type FloorModel = FloorRef & { plan: Plan; index: number };
 export const SLAB_MM = 200;
 export const defaultFloorHeight = (p: Plan) => Math.max(2400, ...p.walls.map((w) => w.height)) + SLAB_MM;
 
-// ─── 주소에 담기 (#b=…) — 짧게: JSON → base64url ──────────────────────────
+// ─── 주소에 담기 (#b=… 건물 하나 · #s=… 도면 한 장에서 나온 건물 여러 개) — JSON → base64url ───
 
-export function encodeBuilding(b: Building) {
-  const json = JSON.stringify(b);
-  const bytes = new TextEncoder().encode(json);
+function enc(v: unknown) {
+  const bytes = new TextEncoder().encode(JSON.stringify(v));
   let s = "";
   bytes.forEach((x) => (s += String.fromCharCode(x)));
   return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
-
-export function decodeBuilding(code: string): Building | null {
+function dec(code: string): unknown {
   try {
     const s = atob(code.replace(/-/g, "+").replace(/_/g, "/"));
-    const json = new TextDecoder().decode(Uint8Array.from(s, (c) => c.charCodeAt(0)));
-    const b = JSON.parse(json) as Building;
-    // 주소는 누구나 고칠 수 있으므로 모양을 확인한다
-    if (!b || !Array.isArray(b.floors) || !(b.use in USE_LABEL)) return null;
-    const ok = b.floors.every((f) => /^[0-9a-f]{32}$/.test(f.jobId) && Number.isFinite(f.heightMm) && f.heightMm > 1000 && f.heightMm < 20000 && Array.isArray(f.stairs));
-    return ok ? b : null;
+    return JSON.parse(new TextDecoder().decode(Uint8Array.from(s, (c) => c.charCodeAt(0))));
   } catch {
     return null;
   }
+}
+// 주소는 누구나 고칠 수 있으므로 모양을 확인한다
+const floorOk = (f: FloorRef) =>
+  !!f && typeof f.jobId === "string" && /^[0-9a-f]{32}$/.test(f.jobId) && Number.isFinite(f.heightMm) && f.heightMm > 1000 && f.heightMm < 20000 && Array.isArray(f.stairs);
+
+export const encodeBuilding = (b: Building) => enc(b);
+export function decodeBuilding(code: string): Building | null {
+  const b = dec(code) as Building | null;
+  if (!b || !Array.isArray(b.floors) || !(b.use in USE_LABEL)) return null;
+  return b.floors.every(floorOk) ? b : null;
 }
 
 export const buildingFromHash = () => {
@@ -70,6 +73,50 @@ export const buildingFromHash = () => {
   return m ? decodeBuilding(m[1]) : null;
 };
 export const buildingHash = (b: Building) => `#b=${encodeBuilding(b)}`;
+
+// ─── 도면 한 장에 평면이 여러 개 ─────────────────────────────────────────
+// 백엔드는 한 장에서 가장 큰 평면 하나만 변환한다(여러 개면 알려 주기만 함). 그래서 프론트가 평면마다 잘라 따로 올리고(sheet.ts),
+// 평면 하나 = 건물 하나로 세운다. 층 표시가 도면에 없어 어느 평면이 몇 층인지는 알 수 없으므로,
+// 사용자가 건물을 끌어 다른 건물 위에 놓아 층으로 쌓는다(SitePage). 최대 4개.
+
+export const MAX_PLANS = 4;
+/** stacks[i] = 건물 하나(아래층부터). 처음에는 평면마다 1층짜리 건물. labels[i] = 그 건물의 이름표(A·B·C…) — 쌓거나 떼어도 남은 건물의 이름이 바뀌지 않게 따로 둔다 */
+export type Site = { use: UseKey; sheet?: string; stacks: FloorRef[][]; labels?: string[] };
+const LETTERS = "ABCDEFGHIJKLMNOP";
+export const siteLabels = (s: Site) => s.stacks.map((_, i) => s.labels?.[i] ?? LETTERS[i] ?? String(i + 1));
+
+export function decodeSite(code: string): Site | null {
+  const s = dec(code) as Site | null;
+  if (!s || !Array.isArray(s.stacks) || !(s.use in USE_LABEL) || s.stacks.length > 16) return null;
+  if (!s.stacks.every((st) => Array.isArray(st) && st.length > 0 && st.every(floorOk))) return null;
+  const labels = Array.isArray(s.labels) && s.labels.length === s.stacks.length && s.labels.every((l) => typeof l === "string" && /^[A-Z0-9]{1,2}$/.test(l)) ? s.labels : undefined;
+  return { use: s.use, sheet: typeof s.sheet === "string" ? s.sheet.slice(0, 120) : undefined, stacks: s.stacks, labels };
+}
+export const siteFromHash = () => {
+  const m = location.hash.match(/^#s=([A-Za-z0-9_-]+)$/);
+  return m ? decodeSite(m[1]) : null;
+};
+export const siteHash = (s: Site) => `#s=${enc(s)}`;
+
+/** 층 이름을 아래부터 1F, 2F…로 다시 붙인다 */
+export const renumber = (floors: FloorRef[]) => floors.map((f, i) => ({ ...f, name: `${i + 1}F` }));
+
+/** 건물 from을 건물 to 위에 올린다(from의 층들이 to의 위층이 된다) */
+export function stackOnto(site: Site, from: number, to: number): Site {
+  if (from === to || !site.stacks[from] || !site.stacks[to]) return site;
+  const merged = renumber([...site.stacks[to], ...site.stacks[from]]);
+  return { ...site, stacks: site.stacks.flatMap((st, i) => (i === from ? [] : i === to ? [merged] : [st])), labels: siteLabels(site).filter((_, i) => i !== from) };
+}
+
+/** 건물 si의 fi번째 층을 떼어 따로 세운다 */
+export function unstack(site: Site, si: number, fi: number): Site {
+  const st = site.stacks[si];
+  if (!st || st.length < 2 || !st[fi]) return site;
+  const rest = renumber(st.filter((_, i) => i !== fi));
+  const labels = siteLabels(site);
+  const fresh = [...LETTERS].find((l) => !labels.includes(l)) ?? String(labels.length + 1); // 안 쓰는 첫 글자
+  return { ...site, stacks: [...site.stacks.slice(0, si), rest, ...site.stacks.slice(si + 1), renumber([st[fi]])], labels: [...labels, fresh] };
+}
 
 // ─── 계단 계산 ───────────────────────────────────────────────────────────
 
