@@ -17,9 +17,13 @@ import { PlanView } from "./PlanView";
 
 const BuildingView = lazy(() => import("./BuildingView").then((m) => ({ default: m.BuildingView })));
 
-type Props = { sample?: FloorModel[]; building?: Building; onChange?: (b: Building) => void };
+type Props = {
+  sample?: FloorModel[]; building?: Building; onChange?: (b: Building) => void;
+  title?: string; // 도면 한 장에서 나온 건물이면 "건물 A"
+  back?: { label: string; onClick: () => void }; // 건물 모두 보기로 돌아가기(SitePage)
+};
 
-export function BuildingPage({ sample, building, onChange }: Props) {
+export function BuildingPage({ sample, building, onChange, title, back }: Props) {
   // 샘플은 화면 안에서만 고친다(주소에 안 남음)
   const [sampleState, setSampleState] = useState<{ use: UseKey; floors: FloorModel[] } | null>(sample ? { use: "apartment", floors: sample } : null);
   const jobs = useFloorJobs(building?.floors.map((f) => f.jobId) ?? []);
@@ -76,8 +80,9 @@ export function BuildingPage({ sample, building, onChange }: Props) {
     <div className="pt-6">
       <header className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4 pb-5">
         <div>
+          {back ? <button type="button" onClick={back.onClick} className="mb-3 block text-label text-ink-3 underline-offset-4 hover:text-ink hover:underline">← {back.label}</button> : null}
           <p className="eyebrow mb-2">{sampleState ? "샘플 건물" : "내 건물"} · <span className="tabular-nums">{refs.length}</span>개 층</p>
-          <h1 className="font-display text-display-sm tracking-display">{sampleState ? "샘플 주택" : "건물 보기"}</h1>
+          <h1 className="font-display text-display-sm tracking-display">{sampleState ? "샘플 주택" : title ?? "건물 보기"}</h1>
         </div>
         <div className="flex flex-wrap items-end gap-3">
           <div className="w-48">
@@ -364,7 +369,7 @@ function StairEditor({ floor, risky, selected, setSelected, onChange, onClose, u
 }
 
 /** 층마다 작업 상태를 불러오고, 아직 인식 중이면 따라간다 */
-function useFloorJobs(ids: string[]) {
+export function useFloorJobs(ids: string[]) {
   const [jobs, setJobs] = useState<Record<string, Job | null>>({});
   const key = ids.join(",");
   useEffect(() => {

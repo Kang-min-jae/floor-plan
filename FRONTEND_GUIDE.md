@@ -38,6 +38,10 @@ Auto-BIM 프론트를 처음 읽는 사람(나 포함)을 위한 설명. 위에�
 | `BuildingView.tsx` | 건물 3D 엔진: Plan → 벽(문·창 구멍)·바닥·계단, 세우기 애니메이션, 층 확대, 보이기, 위험 스캔·설명 | 맨 위 주석, `frame` 함수 |
 | `BuildingPage.tsx` | 건물 화면: 용도, 위험 목록, 층 목록(층고·순서·위층 올리기), 계단 그리기 창(`Dialog size="xl"`) | `StairEditor` |
 | `building.ts`의 `effectiveStairs` | 사용자가 그린 계단이 없으면 인식된 "계단실" 공간에서 계단 후보를 만든다(AI Hub 공간 12종 — 백엔드가 `spaces`를 주면 동작) | |
+| `checks.ts` | 객체별 점검 — 벽·문·창을 하나씩 보고 값이 이상한 것 찾기(벽 밖 문, 겹친 창, 안 붙은 벽…). 서버에 묻지 않는다 | `checkPlan` |
+| `sheet.ts` · `SheetSplitter.tsx` | 한 장에 평면이 여러 개인 도면: 평면 후보 찾기(잉크 덩어리) → 상자 고치기 → 잘라서 따로 올리기 | `findBlobs` |
+| `SitePage.tsx` | 나눈 평면마다 건물 하나. 끌어서 다른 건물 위에 놓으면 층으로 쌓임(주소 `#s=`) | `StackCard`, `building.ts`의 `stackOnto` |
+| `scripts/test-units.mjs` | 위 순수 함수들의 테스트(`npm test`, 빌드 때도 돈다) | |
 | `rules.ts` | 위험 검토 규칙 — 용도별 기준 수치, 법규/통상 구분, "왜 위험한지" 문장 | `STAIR_STD`, `review` |
 | `stageFloor.ts` | 3D 무대 공간감: 흐려지는 바닥 격자, 그림자 바닥, 무대 CSS 변수(--stage-*) 읽기 — Viewer3D가 씀 | `makeFadingGrid` |
 | `riskPin.ts` | 위험 번호 모양(3D와 목록이 같이 씀), 정렬(층 → 법규 먼저)·요소별 묶기 — 이 순서가 곧 번호 | `sortFindings`, `groupFindings` |

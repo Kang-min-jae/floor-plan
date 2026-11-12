@@ -113,14 +113,26 @@ export function BuildingView({
     scene.add(sun);
     scene.add(sun.target);
 
+    // 층 맞추기 — 층마다 따로 올린 도면은 좌표의 시작점이 서로 다르다(그림마다 여백이 다름).
+    // 그대로 쌓으면 위층이 옆으로 밀려 나므로, 층마다 벽 범위의 가운데를 1층 가운데에 맞춘다.
+    // 샘플처럼 처음부터 같은 좌표로 만든 층(작업 ID 없음)은 건드리지 않는다. ⚠ 가운데 맞춤은 어림이다 — 층 모양이 다르면 어긋날 수 있다.
+    const centers = floors.map((f) => {
+      let a = Infinity, b = -Infinity, c = Infinity, d = -Infinity;
+      for (const w of f.plan.walls) for (const q of [w.start, w.end]) { a = Math.min(a, q.x / 1000); b = Math.max(b, q.x / 1000); c = Math.min(c, -q.y / 1000); d = Math.max(d, -q.y / 1000); }
+      return isFinite(a) ? { x: (a + b) / 2, z: (c + d) / 2 } : null;
+    });
+    const c0 = centers.find((c) => c) ?? { x: 0, z: 0 };
+    const shift = floors.map((f, i) => (f.jobId && centers[i] ? { x: c0.x - centers[i]!.x, z: c0.z - centers[i]!.z } : { x: 0, z: 0 }));
+
     // 건물 전체 범위 → 가운데 맞추기
     let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
-    for (const f of floors)
+    floors.forEach((f, i) => {
       for (const w of f.plan.walls)
         for (const q of [w.start, w.end]) {
-          minX = Math.min(minX, q.x / 1000); maxX = Math.max(maxX, q.x / 1000);
-          minZ = Math.min(minZ, -q.y / 1000); maxZ = Math.max(maxZ, -q.y / 1000);
+          minX = Math.min(minX, q.x / 1000 + shift[i].x); maxX = Math.max(maxX, q.x / 1000 + shift[i].x);
+          minZ = Math.min(minZ, -q.y / 1000 + shift[i].z); maxZ = Math.max(maxZ, -q.y / 1000 + shift[i].z);
         }
+    });
     if (!isFinite(minX)) { minX = 0; maxX = 10; minZ = 0; maxZ = 10; }
     const span = Math.max(maxX - minX, maxZ - minZ, 4);
     const sc = sun.shadow.camera as THREE.OrthographicCamera;
@@ -168,6 +180,7 @@ export function BuildingView({
 
     floors.forEach((F, fi) => {
       const g = new THREE.Group();
+      g.position.set(shift[fi].x, 0, shift[fi].z);
       root.add(g);
       const rec: FloorRec = {
         g, slab: null as unknown as THREE.Mesh, wallGroups: [], lineGeo: new THREE.BufferGeometry(), lineMat: new THREE.LineBasicMaterial(),
