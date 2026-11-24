@@ -14,6 +14,7 @@ import { LEVEL_LABEL, STAIR_STD, review, type Finding } from "./rules";
 import { RISK_PIN, elementLabel, groupFindings, sortFindings } from "./riskPin";
 import { ALL_LAYERS, LAYER_LABEL, type Layer } from "./BuildingView";
 import { PlanView } from "./PlanView";
+import { retryable } from "./useJob";
 
 const BuildingView = lazy(() => import("./BuildingView").then((m) => ({ default: m.BuildingView })));
 
@@ -57,6 +58,31 @@ export function BuildingPage({ sample, building, onChange, title, back }: Props)
   const [scanToken, setScanToken] = useState(0);
   const [drawFloor, setDrawFloor] = useState<number | null>(null);
   const [stairSel, setStairSel] = useState<string | null>(null);
+  // 계단 그리기 창의 되돌리기: 바꾸기 직전의 계단 목록(주소에 저장되는 원래 값)을 차례로 쌓는다.
+  // 취소 = 창을 연 순간의 계단으로 돌아가고 닫기
+  const [stairHist, setStairHist] = useState<Stair[][]>([]);
+  const stairStart = useRef<Stair[] | null>(null);
+  const openStairs = (i: number) => {
+    setDrawFloor(i);
+    setStairSel(null);
+    setStairHist([]);
+    stairStart.current = refs[i]?.stairs ?? [];
+  };
+  const setStairs = (stairs: Stair[]) => {
+    if (drawFloor === null || !refs[drawFloor]) return;
+    setFloor(drawFloor, { stairs });
+  };
+  const undoStairs = () => {
+    const prev = stairHist[stairHist.length - 1];
+    if (!prev) return;
+    setStairHist(stairHist.slice(0, -1));
+    setStairs(prev);
+  };
+  const cancelStairs = () => {
+    if (stairHist.length && stairStart.current) setStairs(stairStart.current);
+    setStairHist([]);
+    setDrawFloor(null);
+  };
 
   // 3D가 다시 지어지는 건 층·계단·층고가 바뀔 때만 — 위험 결과는 그때마다 다시 계산
   const shapeKey = JSON.stringify(floors.map((f) => [f.jobId, f.heightMm, f.stairs, f.plan.walls.length]));
@@ -221,7 +247,7 @@ export function BuildingPage({ sample, building, onChange, title, back }: Props)
                   onPatch={(p) => setFloor(i, p)}
                   onMove={(d) => { const a = [...refs]; [a[i], a[i + d]] = [a[i + d], a[i]]; update({ floors: a.map((x, k) => ({ ...x, name: `${k + 1}F` })) }); }}
                   onRemove={() => update({ floors: refs.filter((_, k) => k !== i).map((x, k) => ({ ...x, name: `${k + 1}F` })) })}
-                  onDrawStair={() => { setDrawFloor(i); setStairSel(null); }} />
+                  onDrawStair={() => openStairs(i)} />
               ))}
             </ul>
             {!sampleState ? <AddFloor onAdded={(job) => update({ floors: [...refs, { jobId: job.id, name: `${refs.length + 1}F`, heightMm: 2900, stairs: [] }] })} /> : null}
@@ -235,8 +261,15 @@ export function BuildingPage({ sample, building, onChange, title, back }: Props)
         risky={new Set(findings.filter((x) => x.floor === drawFloor).map((x) => x.elementId))}
         selected={stairSel}
         setSelected={setStairSel}
-        onChange={(stairs) => { if (drawFloor !== null) setFloor(drawFloor, { stairs: stairs.map(({ auto: _auto, ...st }: Stair & { auto?: boolean }) => st) }); }}
-        onClose={() => setDrawFloor(null)}
+        onChange={(stairs) => {
+          if (drawFloor === null || !refs[drawFloor]) return;
+          setStairHist([...stairHist, refs[drawFloor].stairs]);
+          setStairs(stairs.map(({ auto: _auto, ...st }: Stair & { auto?: boolean }) => st));
+        }}
+        onClose={() => { setStairHist([]); setDrawFloor(null); }}
+        undoCount={stairHist.length}
+        onUndo={undoStairs}
+        onCancel={cancelStairs}
         use={use}
         byKey={byKey}
       />
@@ -306,21 +339,59 @@ function AddFloor({ onAdded }: { onAdded: (j: Job) => void }) {
 }
 
 /** 계단 그리기: 평면에서 끌어 사각형 → 단 수·오르는 방향 정하기 */
-function StairEditor({ floor, risky, selected, setSelected, onChange, onClose, use, byKey }: {
+function StairEditor({ floor, risky, selected, setSelected, onChange, onClose, undoCount, onUndo, onCancel, use, byKey }: {
   floor: FloorModel | null; risky: Set<string>; selected: string | null; setSelected: (s: string | null) => void;
   onChange: (s: Stair[]) => void; onClose: () => void; use: UseKey; byKey: Map<string, Finding>;
+  undoCount: number; onUndo: () => void; onCancel: () => void; // 되돌리기(한 단계) · 취소(창을 연 때로)
 }) {
   const st = floor?.stairs.find((s) => s.id === selected) ?? null;
   const std = STAIR_STD[use];
   const set = (p: Partial<Stair>) => floor && st && onChange(floor.stairs.map((s) => (s.id === st.id ? { ...s, ...p } : s)));
+  const open = floor !== null;
+  /** 고른 계단 하나만 지운다(그린 순서와 상관없이). 지우기도 되돌리기로 되살릴 수 있다 */
+  const removeStair = (id: string) => {
+    if (!floor) return;
+    onChange(floor.stairs.filter((s) => s.id !== id));
+    if (selected === id) setSelected(null);
+  };
+  const removeRef = useRef(removeStair);
+  removeRef.current = removeStair;
+  const selectedRef = useRef<string | null>(null);
+  selectedRef.current = st ? st.id : null; // 계단을 고른 때만 지운다
+  // 키보드: Ctrl+Z(⌘Z) 되돌리기 · Delete/Backspace 고른 계단 지우기 — 글자 칸에서는 브라우저 기본 동작을 그대로 둔다
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        onUndo();
+      } else if ((e.key === "Delete" || e.key === "Backspace") && selectedRef.current) {
+        e.preventDefault();
+        removeRef.current(selectedRef.current);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onUndo]);
   return (
     <Dialog
-      open={floor !== null}
+      open={open}
       onClose={onClose}
       size="xl"
       title={floor ? `${floor.name} 계단 그리기` : "계단 그리기"}
       description="평면에서 계단 자리를 끌어 사각형으로 그려요. 다음 층 바닥까지 올라가는 곧은 계단으로 만들어요."
-      actions={<Button onClick={onClose}>다 했어요</Button>}
+      actions={
+        <>
+          {/* 취소 = 이 창에서 바꾼 것을 모두 버리고 닫기. 바꾼 게 없으면 위의 닫기(X)와 같으므로 숨긴다 */}
+          {undoCount ? <Button variant="text" onClick={onCancel}>취소</Button> : null}
+          <Button variant="secondary" onClick={onUndo} disabledReason={undoCount ? undefined : "되돌릴 내용이 없어요"} aria-keyshortcuts="Control+Z">
+            되돌리기{undoCount ? ` (${undoCount})` : ""}
+          </Button>
+          <Button onClick={onClose}>다 했어요</Button>
+        </>
+      }
     >
       {floor ? (
         <div className="grid gap-6 lg:grid-cols-12">
@@ -336,6 +407,26 @@ function StairEditor({ floor, risky, selected, setSelected, onChange, onClose, u
               }} />
           </div>
           <div className="space-y-4 lg:col-span-4">
+            {/* 계단 목록 — 겹쳐 그려 평면에서 누르기 어려워도 여기서 고르고, 원하는 것만 바로 지운다 */}
+            {floor.stairs.length ? (
+              <ul className="divide-y divide-line border-y border-line" aria-label="이 층 계단">
+                {floor.stairs.map((s) => {
+                  const d = stairDims(s);
+                  const on = s.id === st?.id;
+                  return (
+                    <li key={s.id} className={cx("flex items-center gap-3 py-2", on && "bg-surface-2")}>
+                      <button type="button" onClick={() => setSelected(on ? null : s.id)} aria-pressed={on} className="flex min-w-0 flex-1 items-baseline gap-2 px-1 text-left">
+                        <span className="text-body-sm font-medium">계단 {s.id}</span>
+                        <span className="truncate text-label tabular-nums text-ink-3">{(d.width / 1000).toFixed(2)} × {(d.run / 1000).toFixed(2)} m · {s.steps}단</span>
+                      </button>
+                      <button type="button" onClick={() => removeStair(s.id)} aria-label={`계단 ${s.id} 지우기`} className="shrink-0 px-1 text-label text-danger underline-offset-4 hover:underline">
+                        지우기
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : null}
             {st ? (
               <>
                 <h3 className="flex items-baseline gap-2">
@@ -348,23 +439,42 @@ function StairEditor({ floor, risky, selected, setSelected, onChange, onClose, u
                   { label: "단높이", value: Math.round(stairRiseTread(st, floor.heightMm).riser), unit: "mm" },
                   { label: "단너비", value: Math.round(stairRiseTread(st, floor.heightMm).tread), unit: "mm" },
                 ]} />
-                <TextField label="단 수" inputMode="numeric" value={String(st.steps)}
-                  onChange={(e) => { const v = Number(e.target.value); if (v >= 2 && v <= 40) set({ steps: Math.round(v) }); }}
+                <StepsField key={st.id} value={st.steps} onCommit={(v) => set({ steps: v })}
                   hint={`${USE_LABEL[use]} 기준 단높이 ${std.riser}mm 이하 → ${Math.ceil(floor.heightMm / std.riser)}단 이상`} />
                 <Select label="오르는 방향" value={st.dir} onChange={(e) => set({ dir: e.target.value as Stair["dir"] })}
                   options={[{ value: "x+", label: "오른쪽으로" }, { value: "x-", label: "왼쪽으로" }, { value: "y+", label: "위쪽으로" }, { value: "y-", label: "아래쪽으로" }]} />
                 {[...byKey.values()].filter((f) => f.floor === floor.index && f.elementId === st.id).map((f, i) => (
                   <p key={i} className="text-body-sm text-danger">{f.title}: {f.measured} → {f.standard}</p>
                 ))}
-                <Button variant="danger" size="sm" onClick={() => { onChange(floor.stairs.filter((s) => s.id !== st.id)); setSelected(null); }}>이 계단 지우기</Button>
+                <Button variant="danger" size="sm" onClick={() => removeStair(st.id)} aria-keyshortcuts="Delete">이 계단 지우기</Button>
+                <p className="text-label text-ink-3">고른 계단은 Delete 키로도 지울 수 있어요. 잘못 지우면 되돌리기로 살려요.</p>
               </>
             ) : (
-              <p className="text-body-sm text-ink-3">계단을 그리거나 눌러서 고르면 단 수와 방향을 정할 수 있어요.</p>
+              <p className="text-body-sm text-ink-3">계단을 그리거나 평면·목록에서 눌러 고르면 단 수와 방향을 정할 수 있어요.</p>
             )}
           </div>
         </div>
       ) : null}
     </Dialog>
+  );
+}
+
+/** 단 수 칸: 지우고 다시 쓰는 중간 값("1")도 받아 두고, 칸에서 벗어나거나 Enter를 누를 때 확인해 반영한다 */
+function StepsField({ value, onCommit, hint }: { value: number; onCommit: (v: number) => void; hint: string }) {
+  const [text, setText] = useState(String(value));
+  const [err, setErr] = useState<string>();
+  useEffect(() => setText(String(value)), [value]); // 되돌리기 등으로 바뀌면 칸도 따라간다
+  const commit = () => {
+    const v = Number(text);
+    if (!Number.isInteger(v) || v < 2 || v > 200) return setErr("2~200 사이 정수로 넣어 주세요");
+    setErr(undefined);
+    if (v !== value) onCommit(v);
+  };
+  return (
+    <TextField label="단 수" inputMode="numeric" value={text} error={err} hint={hint}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => e.key === "Enter" && commit()} />
   );
 }
 
@@ -381,8 +491,11 @@ export function useFloorJobs(ids: string[]) {
         if (stop) return;
         setJobs((m) => ({ ...m, [id]: j }));
         if (j.status === "queued" || j.status === "running") timers.push(window.setTimeout(() => load(id, n + 1), Math.min(3000, 800 + n * 200)));
-      } catch {
-        if (!stop) setJobs((m) => ({ ...m, [id]: null }));
+      } catch (e) {
+        if (stop) return;
+        // 잠깐 끊긴 것이면 마지막으로 받은 값을 두고 다시 묻는다. 작업이 없을 때(404)만 "찾을 수 없음"으로
+        if (e instanceof ApiError && retryable(e)) timers.push(window.setTimeout(() => load(id, n + 1), 3000));
+        else setJobs((m) => ({ ...m, [id]: null }));
       }
     };
     ids.forEach((id) => load(id));

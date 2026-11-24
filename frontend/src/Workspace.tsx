@@ -42,7 +42,16 @@ export function Workspace({ job, busy, track, onRestart, onBuilding, onSplit }: 
     [preview, draft.resolved],
   );
   // 객체별 점검 — 고칠 내용이 반영된 Plan으로 계산해서, 값을 고치면 바로 사라진다(적용 전에도)
-  const checks = useMemo(() => checkPlan(preview).filter((c) => !removed.has(c.id)), [preview, removed]);
+  // 지우기로 한 요소는 빼고 점검한다 — 남은 요소에 "o2와 겹침" 같은 오류가 남지 않게
+  const checks = useMemo(
+    () =>
+      checkPlan({
+        ...preview,
+        walls: preview.walls.filter((w) => !removed.has(w.id)),
+        openings: preview.openings.filter((o) => !removed.has(o.id) && !removed.has(o.wall_id)),
+      }),
+    [preview, removed],
+  );
   const checkMap = useMemo(() => checksById(checks), [checks]);
   const issueIds = useMemo(() => new Set(checks.filter((c) => c.level === "error" && c.id !== "plan").map((c) => c.id)), [checks]);
   const changes = useMemo(() => changeList(plan, draft), [plan, draft]);
@@ -204,7 +213,7 @@ export function Workspace({ job, busy, track, onRestart, onBuilding, onSplit }: 
             {selected ? (
               <>
                 {selChecks.length ? <CheckNotes checks={selChecks} className="mb-4" /> : null}
-                <Inspector plan={plan} preview={preview} draft={draft} setDraft={setDraft} id={selected} onSelect={setSelected} />
+                <Inspector key={selected} plan={plan} preview={preview} draft={draft} setDraft={setDraft} id={selected} onSelect={setSelected} />
               </>
             ) : (
               <p className="text-body-sm text-ink-3">3D나 평면에서 벽·문·창을 누르면 여기서 값을 고칠 수 있어요.</p>
@@ -241,8 +250,8 @@ export function Workspace({ job, busy, track, onRestart, onBuilding, onSplit }: 
                           <span aria-hidden className={cx("size-2 shrink-0 rounded-full", done ? "bg-line-strong" : r.error ? "bg-(--color-risk)" : "bg-(--color-review)")} />
                           <span className="min-w-0 flex-1">
                             <span className={cx("block text-body-sm font-medium", done && "line-through")}>{elementName(r.el, r.id)}</span>
-                            {r.checks.map((c) => (
-                              <span key={c.code} className="block text-label">
+                            {r.checks.map((c, ci) => (
+                              <span key={`${c.code}-${ci}`} className="block text-label">
                                 <span className={c.level === "error" ? "font-medium text-danger" : "text-ink-2"}>{c.title}</span>
                                 <span className="text-ink-3"> · {c.detail}</span>
                               </span>
@@ -402,8 +411,8 @@ function AllElements({ plan, removed, selected, onSelect, flagged, errors }: { p
 function CheckNotes({ checks, className }: { checks: Check[]; className?: string }) {
   return (
     <ul className={cx("space-y-2", className)}>
-      {checks.map((c) => (
-        <li key={c.code} className={cx("border-l-2 pl-3", c.level === "error" ? "border-(--color-risk)" : "border-(--color-review)")}>
+      {checks.map((c, i) => (
+        <li key={`${c.code}-${i}`} className={cx("border-l-2 pl-3", c.level === "error" ? "border-(--color-risk)" : "border-(--color-review)")}>
           <p className="text-body-sm font-medium text-ink">{c.title} <span className="text-label font-normal text-ink-3">· {c.detail}</span></p>
           <p className="text-label text-ink-2">{c.fix}</p>
         </li>

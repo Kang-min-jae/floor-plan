@@ -437,6 +437,12 @@ export function Viewer3D({ url, modelKey, plan, selected, review, issues = NO_IS
     api.current?.paint(selected, review);
   }, [selected, review, issues, show]);
 
+  // 새 리비전(glb)이 오면 3D는 전체 높이로 다시 잘리므로 슬라이더도 새 최고 높이로 맞춘다(슬라이더와 실제 단면이 어긋나지 않게)
+  useEffect(() => {
+    setCut(maxH);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [url]);
+
   useEffect(() => {
     api.current?.setCut(cut + 0.0001); // 중괄호 필수: 값을 돌려주면 React가 정리 함수로 착각한다
   }, [cut]);

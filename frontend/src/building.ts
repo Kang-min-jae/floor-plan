@@ -58,13 +58,21 @@ function dec(code: string): unknown {
   }
 }
 // 주소는 누구나 고칠 수 있으므로 모양을 확인한다
+// (용도는 자기 키만 — "toString" 같은 상속된 이름이 통과하지 않게. 계단은 단 수가 0이면 평면 그리기가 깨졌다)
+const isUse = (u: unknown): u is UseKey => typeof u === "string" && Object.prototype.hasOwnProperty.call(USE_LABEL, u);
+const num = (v: unknown) => typeof v === "number" && Number.isFinite(v);
+const DIRS: Stair["dir"][] = ["x+", "x-", "y+", "y-"];
+const stairOk = (s: Stair) =>
+  !!s && typeof s.id === "string" && num(s.x0) && num(s.y0) && num(s.x1) && num(s.y1) &&
+  Number.isInteger(s.steps) && s.steps >= 2 && s.steps <= 200 && DIRS.includes(s.dir);
 const floorOk = (f: FloorRef) =>
-  !!f && typeof f.jobId === "string" && /^[0-9a-f]{32}$/.test(f.jobId) && Number.isFinite(f.heightMm) && f.heightMm > 1000 && f.heightMm < 20000 && Array.isArray(f.stairs);
+  !!f && typeof f.jobId === "string" && /^[0-9a-f]{32}$/.test(f.jobId) && typeof f.name === "string" &&
+  num(f.heightMm) && f.heightMm > 1000 && f.heightMm < 20000 && Array.isArray(f.stairs) && f.stairs.every(stairOk);
 
 export const encodeBuilding = (b: Building) => enc(b);
 export function decodeBuilding(code: string): Building | null {
   const b = dec(code) as Building | null;
-  if (!b || !Array.isArray(b.floors) || !(b.use in USE_LABEL)) return null;
+  if (!b || !Array.isArray(b.floors) || !isUse(b.use)) return null;
   return b.floors.every(floorOk) ? b : null;
 }
 
@@ -87,7 +95,7 @@ export const siteLabels = (s: Site) => s.stacks.map((_, i) => s.labels?.[i] ?? L
 
 export function decodeSite(code: string): Site | null {
   const s = dec(code) as Site | null;
-  if (!s || !Array.isArray(s.stacks) || !(s.use in USE_LABEL) || s.stacks.length > 16) return null;
+  if (!s || !Array.isArray(s.stacks) || !isUse(s.use) || s.stacks.length > 16) return null;
   if (!s.stacks.every((st) => Array.isArray(st) && st.length > 0 && st.every(floorOk))) return null;
   const labels = Array.isArray(s.labels) && s.labels.length === s.stacks.length && s.labels.every((l) => typeof l === "string" && /^[A-Z0-9]{1,2}$/.test(l)) ? s.labels : undefined;
   return { use: s.use, sheet: typeof s.sheet === "string" ? s.sheet.slice(0, 120) : undefined, stacks: s.stacks, labels };

@@ -6,7 +6,7 @@
 //
 //   error = 이대로 3D·dxf를 만들면 틀린 모양이 된다 → 빨간색
 //   warn  = 틀렸을 가능성이 높다 → 확인 필요 색
-// 규칙을 바꾸면 scripts/test-checks.mjs(node --test)도 함께 고친다.
+// 규칙을 바꾸면 scripts/test-units.mjs(npm test)도 함께 고친다.
 import type { Opening, Plan, Wall } from "./api";
 import { wallDir, wallLength } from "./plan";
 
