@@ -3,7 +3,7 @@
 // 왜 모아서 보내나: 보충 입력 한 번마다 서버가 3D·DXF를 다시 만든다(revision +1).
 // 칸 하나 고칠 때마다 보내면 기다림이 길고 리비전만 늘어난다 → 여러 개를 고친 뒤 한 번에 적용.
 import type { NewOpening, OpeningPatch, Plan, ScaleHint, SupplementRequest, WallPatch } from "./api";
-import { elementName, findElement, KIND_LABEL, OPENING_LABEL, mm } from "./plan";
+import { DEFAULTS, elementName, findElement, KIND_LABEL, OPENING_LABEL, mm } from "./plan";
 
 export type Draft = {
   scale: ScaleHint | null;
@@ -49,11 +49,24 @@ export function toggleResolved(d: Draft, id: string): Draft {
 export function removeElement(plan: Plan, d: Draft, id: string): Draft {
   const gone = removedSet(plan, { ...d, remove: [...d.remove, id] });
   const keep = <T,>(r: Record<string, T>) => Object.fromEntries(Object.entries(r).filter(([k]) => !gone.has(k)));
+  // 지운 벽으로 옮기려던 문·창은 옮기기만 취소한다(원래 벽에 남는다)
+  const openings = Object.fromEntries(
+    Object.entries(keep(d.openings))
+      .map(([k, p]) => {
+        if (!p.wall_id || !gone.has(p.wall_id)) return [k, p] as const;
+        const { wall_id: _, ...rest } = p;
+        return [k, rest] as const;
+      })
+      .filter(([, p]) => Object.keys(p).length),
+  );
+  // 지운 벽을 기준으로 한 축척도 함께 버린다
+  const scale = d.scale && "reference" in d.scale && gone.has(d.scale.reference.wall_id) ? null : d.scale;
   return {
     ...d,
+    scale,
     remove: [...d.remove.filter((x) => x !== id), id],
     walls: keep(d.walls),
-    openings: keep(d.openings),
+    openings,
     resolved: d.resolved.filter((x) => !gone.has(x)),
     addOpenings: d.addOpenings.filter((o) => !gone.has(o.wall_id)),
   };
@@ -86,13 +99,14 @@ export function previewPlan(plan: Plan, d: Draft): Plan {
     walls: plan.walls.map((w) => ({ ...w, ...d.walls[w.id] })),
     openings: [
       ...plan.openings.map((o) => ({ ...o, ...d.openings[o.id] })),
+      // 크기를 안 정한 새 문·창은 서버처럼 기본값으로 보여 준다(0으로 두면 안 보이고 "폭이 이상해요"가 떴다)
       ...d.addOpenings.map((n, i) => ({
+        ...n,
         id: `${NEW_PREFIX}${i + 1}`,
         confidence: null,
-        width: n.width ?? 0,
-        height: n.height ?? 0,
-        sill_height: n.sill_height ?? 0,
-        ...n,
+        width: n.width ?? DEFAULTS[n.type].width,
+        height: n.height ?? DEFAULTS[n.type].height,
+        sill_height: n.sill_height ?? DEFAULTS[n.type].sill_height,
       })),
     ],
     review_items: plan.review_items.filter((r) => !gone.has(r.element_id)),
