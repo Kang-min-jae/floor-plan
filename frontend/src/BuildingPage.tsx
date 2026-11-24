@@ -342,7 +342,7 @@ function AddFloor({ onAdded }: { onAdded: (j: Job) => void }) {
 function StairEditor({ floor, risky, selected, setSelected, onChange, onClose, undoCount, onUndo, onCancel, use, byKey }: {
   floor: FloorModel | null; risky: Set<string>; selected: string | null; setSelected: (s: string | null) => void;
   onChange: (s: Stair[]) => void; onClose: () => void; use: UseKey; byKey: Map<string, Finding>;
-  undoCount: number; onUndo: () => void; onCancel: () => void; // 되돌리기(한 단계) · 취소(창을 연 때로)
+  undoCount: number; onUndo: () => void; onCancel: () => void; // 되돌리기(Ctrl+Z, 한 단계) · 취소(창을 연 때로)
 }) {
   const st = floor?.stairs.find((s) => s.id === selected) ?? null;
   const std = STAIR_STD[use];
@@ -386,9 +386,6 @@ function StairEditor({ floor, risky, selected, setSelected, onChange, onClose, u
         <>
           {/* 취소 = 이 창에서 바꾼 것을 모두 버리고 닫기. 바꾼 게 없으면 위의 닫기(X)와 같으므로 숨긴다 */}
           {undoCount ? <Button variant="text" onClick={onCancel}>취소</Button> : null}
-          <Button variant="secondary" onClick={onUndo} disabledReason={undoCount ? undefined : "되돌릴 내용이 없어요"} aria-keyshortcuts="Control+Z">
-            되돌리기{undoCount ? ` (${undoCount})` : ""}
-          </Button>
           <Button onClick={onClose}>다 했어요</Button>
         </>
       }
@@ -447,7 +444,7 @@ function StairEditor({ floor, risky, selected, setSelected, onChange, onClose, u
                   <p key={i} className="text-body-sm text-danger">{f.title}: {f.measured} → {f.standard}</p>
                 ))}
                 <Button variant="danger" size="sm" onClick={() => removeStair(st.id)} aria-keyshortcuts="Delete">이 계단 지우기</Button>
-                <p className="text-label text-ink-3">고른 계단은 Delete 키로도 지울 수 있어요. 잘못 지우면 되돌리기로 살려요.</p>
+                <p className="text-label text-ink-3">고른 계단은 Delete 키로도 지울 수 있어요. 잘못 지우면 Ctrl+Z로 살리거나 취소로 처음 상태로 돌아가요.</p>
               </>
             ) : (
               <p className="text-body-sm text-ink-3">계단을 그리거나 평면·목록에서 눌러 고르면 단 수와 방향을 정할 수 있어요.</p>
